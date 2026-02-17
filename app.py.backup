@@ -1,0 +1,414 @@
+"""Main Streamlit application for therapist bio generator."""
+import streamlit as st
+import os
+import json
+import csv
+from io import StringIO
+from pathlib import Path
+from dotenv import load_dotenv
+from src.scraper.website_scraper import WebsiteScraper
+from src.generator.bio_generator import BioGenerator
+from src.sheets.sheets_writer import SheetsWriter
+from src.utils.logger import setup_logger
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Set up logger
+logger = setup_logger()
+
+# Page config
+st.set_page_config(
+    page_title="Therapist Bio Generator",
+    page_icon="🧠",
+    layout="wide"
+)
+
+
+def get_api_keys():
+    """Get API keys from environment, Streamlit secrets, or user input."""
+    anthropic_key = None
+    google_creds = None
+
+    # Try to get from environment variables first (local development)
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+
+    # Try to load Google credentials from file or JSON string
+    creds_file = os.getenv("GOOGLE_SHEETS_CREDENTIALS_FILE")
+    creds_json = os.getenv("GOOGLE_SHEETS_CREDENTIALS")
+
+    if creds_file and Path(creds_file).exists():
+        # Load from file
+        with open(creds_file, 'r') as f:
+            google_creds = json.load(f)
+    elif creds_json:
+        # Load from JSON string
+        try:
+            google_creds = json.loads(creds_json)
+        except:
+            pass
+
+    # Try to get from Streamlit secrets (for deployment)
+    if not anthropic_key:
+        try:
+            anthropic_key = st.secrets.get("ANTHROPIC_API_KEY")
+        except:
+            pass
+
+    if not google_creds:
+        try:
+            google_creds = dict(st.secrets.get("gcp_service_account", {}))
+        except:
+            pass
+
+    # If not found anywhere, get from user input
+    if not anthropic_key:
+        st.sidebar.subheader("API Configuration")
+        anthropic_key = st.sidebar.text_input(
+            "Anthropic API Key",
+            type="password",
+            help="Get your API key from https://console.anthropic.com"
+        )
+
+    if not google_creds or not google_creds.get("type"):
+        st.sidebar.subheader("Google Sheets Configuration")
+        google_creds_text = st.sidebar.text_area(
+            "Google Service Account JSON",
+            help="Paste your service account JSON credentials here"
+        )
+
+        if google_creds_text:
+            try:
+                google_creds = json.loads(google_creds_text)
+            except:
+                st.sidebar.error("Invalid JSON format")
+                google_creds = None
+
+    return anthropic_key, google_creds
+
+
+def bios_to_csv(bios):
+    """Convert bios to CSV format."""
+    output = StringIO()
+    writer = csv.writer(output)
+
+    # Write header
+    writer.writerow(['Specialty', 'Therapist Name', 'Bio Box (110 words)', 'Source About URL'])
+
+    # Group by specialty and write rows
+    bios_by_specialty = {}
+    for bio in bios:
+        if bio.specialty_name not in bios_by_specialty:
+            bios_by_specialty[bio.specialty_name] = []
+        bios_by_specialty[bio.specialty_name].append(bio)
+
+    for specialty_name in sorted(bios_by_specialty.keys()):
+        specialty_bios = bios_by_specialty[specialty_name]
+        for bio in specialty_bios:
+            writer.writerow([
+                specialty_name,
+                bio.therapist_name,
+                bio.bio_text,
+                str(bio.source_about_url)
+            ])
+
+    return output.getvalue()
+
+
+def main():
+    """Main application function."""
+    st.title("🧠 Therapist Bio Generator")
+    st.markdown("""
+    Generate unique, specialty-specific bio boxes for therapy websites.
+
+    This tool will:
+    1. Scrape therapist bios from your website
+    2. Find specialty/service pages
+    3. Generate unique 110-word bios for each therapist-specialty combination
+    4. Display results on this page and provide CSV download
+    5. Optionally export to Google Sheets
+    """)
+
+    # Get API keys
+    anthropic_key, google_creds = get_api_keys()
+
+    # Check if we have necessary credentials
+    if not anthropic_key:
+        st.warning("⚠️ Please provide your Anthropic API key in the sidebar to continue.")
+        return
+
+    # Google Sheets is now optional
+    if not google_creds:
+        st.info("💡 **Note:** Google Sheets export is optional. You can download results as CSV without Google credentials.")
+        st.caption("If you want to export to Google Sheets, provide your credentials in the sidebar.")
+
+    # Main input
+    st.subheader("Website URL")
+    url = st.text_input(
+        "Enter the therapy website URL to scrape",
+        placeholder="https://example-therapy.com",
+        help="Enter the homepage URL of the therapy website"
+    )
+
+    # Manual URL input option
+    with st.expander("🔗 Manual URL Input (Optional)", expanded=False):
+        st.markdown("""
+        If the automatic scraper doesn't find the right pages, you can manually paste specific URLs here.
+        These will be used **in addition to** any pages found automatically.
+        """)
+
+        manual_about_urls = st.text_area(
+            "Therapist/About Page URLs (one per line)",
+            placeholder="https://example-therapy.com/about\nhttps://example-therapy.com/meet-our-team",
+            help="Paste URLs to therapist bio/about pages, one per line"
+        )
+
+        manual_specialty_urls = st.text_area(
+            "Specialty/Service Page URLs (one per line)",
+            placeholder="https://example-therapy.com/anxiety-therapy\nhttps://example-therapy.com/couples-counseling",
+            help="Paste URLs to specialty/service pages, one per line"
+        )
+
+    # Parse manual URLs
+    manual_about_list = [u.strip() for u in manual_about_urls.split('\n') if u.strip()] if manual_about_urls else []
+    manual_specialty_list = [u.strip() for u in manual_specialty_urls.split('\n') if u.strip()] if manual_specialty_urls else []
+
+    if manual_about_list or manual_specialty_list:
+        st.info(f"📌 Manual URLs: {len(manual_about_list)} about page(s), {len(manual_specialty_list)} specialty page(s)")
+
+    # Optional: Write to existing sheet
+    with st.expander("📊 Use Existing Google Sheet (Optional)", expanded=False):
+        st.markdown("""
+        If you're having quota issues or want to append to an existing sheet, paste the sheet URL here.
+        Otherwise, a new sheet will be created automatically.
+        """)
+
+        existing_sheet_url = st.text_input(
+            "Existing Google Sheet URL (optional)",
+            placeholder="https://docs.google.com/spreadsheets/d/...",
+            help="If provided, results will be written to this existing sheet instead of creating a new one"
+        )
+
+    # Optional: recipient email
+    recipient_email = st.text_input(
+        "Email to share Google Sheet with (optional)",
+        placeholder="you@example.com",
+        help="If provided, the generated sheet will be shared with this email (only works when creating new sheets)"
+    )
+
+    # Generate button
+    if st.button("Generate Bios", type="primary", disabled=not url):
+        if not url:
+            st.error("Please enter a website URL")
+            return
+
+        # Create progress containers
+        progress_text = st.empty()
+        progress_bar = st.progress(0)
+        status_container = st.container()
+
+        def update_progress(message: str):
+            """Update progress display."""
+            progress_text.text(message)
+
+        try:
+            logger.info(f"Starting bio generation for URL: {url}")
+
+            # Step 1: Scrape website
+            with status_container:
+                st.info("🔍 **Step 1/2:** Scraping website...")
+
+            logger.info("Initializing web scraper...")
+            scraper = WebsiteScraper(
+                progress_callback=update_progress,
+                api_key=anthropic_key  # Enable intelligent AI-powered page discovery
+            )
+            result = scraper.scrape_website(
+                url,
+                manual_about_urls=manual_about_list,
+                manual_specialty_urls=manual_specialty_list
+            )
+
+            logger.info(f"Scraping complete. Found {len(result.therapists)} therapists, {len(result.specialties)} specialties")
+            logger.info(f"Errors: {result.errors}")
+
+            if result.errors:
+                st.warning("⚠️ Some issues occurred during scraping:")
+                for error in result.errors:
+                    st.warning(f"- {error}")
+                    logger.warning(f"Scraping error: {error}")
+
+            if not result.therapists:
+                logger.error("No therapists found during scraping")
+                st.error("❌ No therapists found. Please check the URL and try again.")
+                return
+
+            if not result.specialties:
+                logger.error("No specialties found during scraping")
+                st.error("❌ No specialty pages found. The site may not have separate specialty pages.")
+                return
+
+            # Log what was found
+            for therapist in result.therapists:
+                logger.info(f"Found therapist: {therapist.name} ({therapist.source_url})")
+            for specialty in result.specialties:
+                logger.info(f"Found specialty: {specialty.name} ({specialty.url})")
+
+            progress_bar.progress(33)
+
+            # Show what was found
+            with st.expander("📊 Scraping Results", expanded=True):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Therapists Found", len(result.therapists))
+                    for therapist in result.therapists:
+                        st.write(f"- {therapist.name}" + (f" ({therapist.credentials})" if therapist.credentials else ""))
+                with col2:
+                    st.metric("Specialties Found", len(result.specialties))
+                    for specialty in result.specialties:
+                        st.write(f"- {specialty.name}")
+
+            st.metric("Total Bios to Generate", len(result.therapists) * len(result.specialties))
+
+            # Step 2: Generate bios
+            with status_container:
+                st.info("✨ **Step 2/2:** Generating bios with Claude AI...")
+
+            logger.info("Initializing bio generator...")
+            generator = BioGenerator(
+                api_key=anthropic_key,
+                progress_callback=update_progress
+            )
+
+            # Show cost estimate
+            estimated_cost = generator.get_estimated_cost(len(result.therapists) * len(result.specialties))
+            st.info(f"💰 Estimated cost: ${estimated_cost:.2f}")
+            logger.info(f"Estimated cost: ${estimated_cost:.2f}")
+
+            logger.info(f"Starting bio generation for {len(result.therapists)} therapists x {len(result.specialties)} specialties...")
+            bios = generator.generate_bios(result.therapists, result.specialties)
+            logger.info(f"Bio generation complete. Generated {len(bios)} bios")
+
+            if not bios:
+                logger.error("No bios were generated!")
+                st.error("❌ Failed to generate any bios. Please check your API key and try again.")
+                return
+
+            progress_bar.progress(100)
+
+            # Show generation results
+            st.success(f"🎉 **Complete!** Generated {len(bios)} bio(s)")
+            st.info(f"💰 Actual cost: ${generator.total_tokens_used * 0.000003:.4f}")
+
+            # Display bios in a nice table
+            st.markdown("---")
+            st.subheader("📝 Generated Bios")
+
+            # Group bios by specialty
+            bios_by_specialty = {}
+            for bio in bios:
+                if bio.specialty_name not in bios_by_specialty:
+                    bios_by_specialty[bio.specialty_name] = []
+                bios_by_specialty[bio.specialty_name].append(bio)
+
+            # Display each specialty group
+            for specialty_name in sorted(bios_by_specialty.keys()):
+                st.markdown(f"### {specialty_name}")
+                specialty_bios = bios_by_specialty[specialty_name]
+
+                for bio in specialty_bios:
+                    with st.container():
+                        col1, col2 = st.columns([1, 3])
+                        with col1:
+                            st.markdown(f"**{bio.therapist_name}**")
+                            if hasattr(bio, 'source_about_url'):
+                                st.caption(f"[Source]({bio.source_about_url})")
+                        with col2:
+                            st.write(bio.bio_text)
+                    st.divider()
+
+            # Download as CSV button
+            st.markdown("---")
+            csv_data = bios_to_csv(bios)
+            st.download_button(
+                label="📥 Download as CSV",
+                data=csv_data,
+                file_name=f"therapist_bios_{url.split('//')[1].split('/')[0]}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+            # Optional: Google Sheets export
+            st.markdown("---")
+            with st.expander("📊 Export to Google Sheets (Optional)", expanded=False):
+                st.markdown("""
+                Want to export to Google Sheets? This requires Google Drive API setup.
+                If you're having auth issues, just use the CSV download above!
+                """)
+
+                if st.button("Export to Google Sheets"):
+                    with st.spinner("Exporting to Google Sheets..."):
+                        writer = SheetsWriter(
+                            credentials_dict=google_creds,
+                            recipient_email=recipient_email if recipient_email else None
+                        )
+
+                        # Check if writing to existing sheet or creating new one
+                        if existing_sheet_url:
+                            logger.info(f"Writing to existing sheet: {existing_sheet_url}")
+                            success = writer.write_to_existing_sheet(existing_sheet_url, bios)
+
+                            if not success:
+                                st.error("❌ Failed to write to existing Google Sheet. Please check the URL and permissions.")
+                            else:
+                                st.success("✅ Successfully wrote to existing sheet!")
+                                st.markdown(f"[Open Google Sheet]({existing_sheet_url})")
+                        else:
+                            logger.info("Creating new Google Sheet")
+                            sheet_url = writer.write_bios(bios, url)
+
+                            if not sheet_url:
+                                st.error("❌ Failed to write to Google Sheets. Please check your credentials.")
+                                st.info("💡 **Tip:** You can still use the CSV download above!")
+                            else:
+                                st.success("✅ Successfully created Google Sheet!")
+                                st.markdown(f"[Open Google Sheet]({sheet_url})")
+
+        except Exception as e:
+            logger.exception(f"Fatal error during bio generation: {str(e)}")
+            st.error(f"❌ An error occurred: {str(e)}")
+            import traceback
+            with st.expander("Error Details"):
+                st.code(traceback.format_exc())
+
+            # Show log file location
+            st.info("📝 Check the logs folder for detailed error information")
+
+    # Show log location in sidebar
+    with st.sidebar:
+        st.divider()
+        st.caption("📝 **Logs**")
+        st.caption("Detailed logs are saved in the `logs/` folder")
+
+
+if __name__ == "__main__":
+    # Show setup instructions in sidebar
+    with st.sidebar:
+        st.markdown("### 📖 Setup Guide")
+        st.markdown("""
+        **Getting started:**
+
+        1. Get an [Anthropic API key](https://console.anthropic.com) **(Required)**
+        2. Run the tool - it will display results on the page
+        3. Download as CSV - works without any Google setup!
+
+        **Optional: Google Sheets Export**
+        - Create a [Google Service Account](https://console.cloud.google.com)
+        - Enable the Google Sheets API
+        - Download the service account JSON
+        - Paste credentials above
+
+        See the README for detailed instructions.
+        """)
+
+    main()
