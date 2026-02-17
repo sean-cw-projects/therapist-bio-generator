@@ -43,6 +43,8 @@ def initialize_session_state():
         st.session_state.therapist_about_text = ""
     if 'therapist_name' not in st.session_state:
         st.session_state.therapist_name = ""
+    if 'modalities_text' not in st.session_state:
+        st.session_state.modalities_text = ""
     if 'total_tokens_used' not in st.session_state:
         st.session_state.total_tokens_used = 0
     if 'specialty_content' not in st.session_state:
@@ -152,6 +154,7 @@ def extract_specialty_name(content: str) -> str:
 def generate_single_bio_from_manual_input(
     therapist_about: str,
     therapist_name: str,
+    modalities_text: str,
     specialty_content: str,
     specialty_bio_text: str,
     api_key: str
@@ -161,6 +164,7 @@ def generate_single_bio_from_manual_input(
     Args:
         therapist_about: Main therapist about/bio text
         therapist_name: Optional therapist name
+        modalities_text: Optional therapeutic modalities/approaches
         specialty_content: Specialty page content
         specialty_bio_text: Optional specialty-specific bio text from the specialty page
         api_key: Anthropic API key
@@ -172,10 +176,12 @@ def generate_single_bio_from_manual_input(
     # Use provided name or default to "Therapist"
     final_name = therapist_name.strip() if therapist_name.strip() else "Therapist"
 
-    # Combine main bio with specialty-specific bio if provided
+    # Combine main bio with modalities and specialty-specific bio if provided
     combined_bio = therapist_about
+    if modalities_text and modalities_text.strip():
+        combined_bio = f"{therapist_about}\n\n**Therapeutic Modalities:**\n{modalities_text.strip()}"
     if specialty_bio_text and specialty_bio_text.strip():
-        combined_bio = f"{therapist_about}\n\n**Specialty-Specific Bio:**\n{specialty_bio_text.strip()}"
+        combined_bio = f"{combined_bio}\n\n**Specialty-Specific Bio:**\n{specialty_bio_text.strip()}"
 
     # Create Therapist object
     therapist = Therapist(
@@ -253,6 +259,26 @@ def render_manual_entry_tab(anthropic_key, google_creds):
             word_count = len(therapist_about.split())
             st.caption(f"📊 {char_count} characters | {word_count} words")
 
+    # Optional: Therapeutic Modalities
+    with st.expander("➕ Therapeutic Modalities (Optional)", expanded=False):
+        st.markdown("""
+        If you want to specify the therapeutic modalities/approaches the therapist uses, paste them here.
+        This ensures Claude includes the correct modalities instead of guessing.
+        """)
+        modalities_text = st.text_area(
+            "Modalities/Approaches",
+            value=st.session_state.modalities_text,
+            placeholder="CBT, EMDR, Psychodynamic Therapy, Mindfulness-Based Approaches, Trauma-Focused Therapy...",
+            help="Optional: List the therapeutic modalities and approaches",
+            height=100,
+            key="modalities_input"
+        )
+        st.session_state.modalities_text = modalities_text
+
+        if modalities_text:
+            char_count = len(modalities_text)
+            st.caption(f"📊 {char_count} characters")
+
     st.markdown("---")
 
     # Specialty Information Section (Transient)
@@ -319,6 +345,7 @@ def render_manual_entry_tab(anthropic_key, google_creds):
                 bio = generate_single_bio_from_manual_input(
                     therapist_about=therapist_about,
                     therapist_name=therapist_name,
+                    modalities_text=modalities_text,
                     specialty_content=specialty_content,
                     specialty_bio_text=specialty_bio_text,
                     api_key=anthropic_key
