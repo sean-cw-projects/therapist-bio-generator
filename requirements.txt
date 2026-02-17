@@ -4,13 +4,16 @@ anthropic==0.18.1
 pydantic==2.6.0
 python-dotenv==1.0.1
 
+# HTTP and HTML parsing (needed for module imports, lightweight)
+requests==2.31.0
+beautifulsoup4==4.12.3
+lxml==5.1.0
+
 # Google Sheets export (optional)
 gspread==6.0.0
 oauth2client==4.1.3
 
-# Web scraping dependencies (WIP - not needed for Streamlit Cloud)
-# Uncomment these when scraping feature is ready:
+# Web scraping with Playwright (WIP - NOT for Streamlit Cloud)
+# Playwright requires browser binaries that can't be installed on Streamlit Cloud
+# Only uncomment for local development of scraping feature:
 # playwright==1.41.0
-# beautifulsoup4==4.12.3
-# lxml==5.1.0
-# requests==2.31.0
