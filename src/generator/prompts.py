@@ -46,6 +46,7 @@ def create_bio_prompt(
 5. Focus on how {therapist_name} helps clients dealing with this specific concern
 6. Maintain the exact same level of formality, personality, and aesthetic as the original content
 7. Write in third person (he/she/they) if the original bio uses third person, or first person (I) if it uses first person
+8. Do NOT use em dashes (—) anywhere in the bio - use commas, periods, semicolons, or regular hyphens instead
 
 **Output only the bio text - no additional commentary, headers, or explanation.**"""
 
@@ -89,6 +90,7 @@ def create_fallback_bio_prompt(
 6. Include credentials naturally
 7. Maintain the exact same level of formality, personality, and aesthetic as the original content
 8. Write in the same person (first/third) as the original bio
+9. Do NOT use em dashes (—) anywhere in the bio - use commas, periods, semicolons, or regular hyphens instead
 
 **Output only the bio text - no additional commentary, headers, or explanation.**"""
 
