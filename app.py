@@ -259,26 +259,6 @@ def render_manual_entry_tab(anthropic_key, google_creds):
             word_count = len(therapist_about.split())
             st.caption(f"📊 {char_count} characters | {word_count} words")
 
-    # Optional: Therapeutic Modalities
-    with st.expander("➕ Therapeutic Modalities (Optional)", expanded=False):
-        st.markdown("""
-        If you want to specify the therapeutic modalities/approaches the therapist uses, paste them here.
-        This ensures Claude includes the correct modalities instead of guessing.
-        """)
-        modalities_text = st.text_area(
-            "Modalities/Approaches",
-            value=st.session_state.modalities_text,
-            placeholder="CBT, EMDR, Psychodynamic Therapy, Mindfulness-Based Approaches, Trauma-Focused Therapy...",
-            help="Optional: List the therapeutic modalities and approaches",
-            height=100,
-            key="modalities_input"
-        )
-        st.session_state.modalities_text = modalities_text
-
-        if modalities_text:
-            char_count = len(modalities_text)
-            st.caption(f"📊 {char_count} characters")
-
     st.markdown("---")
 
     # Specialty Information Section (Transient)
@@ -301,6 +281,27 @@ def render_manual_entry_tab(anthropic_key, google_creds):
         word_count = len(specialty_content.split())
         specialty_name = extract_specialty_name(specialty_content)
         st.caption(f"📊 {char_count} characters | {word_count} words | Specialty: **{specialty_name}**")
+
+    # Optional: Modalities specific to this specialty
+    with st.expander("➕ Therapeutic Modalities for This Specialty (Optional)", expanded=False):
+        st.markdown("""
+        List the therapeutic modalities or approaches used specifically for this specialty.
+        Examples: CBT, DBT, EMDR, Psychodynamic Therapy, Solution-Focused Therapy, etc.
+        """)
+        modalities_text = st.text_area(
+            "Therapeutic Modalities",
+            value=st.session_state.modalities_text,
+            placeholder="Cognitive Behavioral Therapy (CBT)\nExposure and Response Prevention (ERP)\nAcceptance and Commitment Therapy (ACT)",
+            help="Optional: List therapeutic approaches relevant to this specialty",
+            height=120,
+            key="modalities_input"
+        )
+        st.session_state.modalities_text = modalities_text
+
+        if modalities_text:
+            char_count = len(modalities_text)
+            word_count = len(modalities_text.split())
+            st.caption(f"📊 {char_count} characters | {word_count} words")
 
     # Optional: Existing specialty-specific bio
     with st.expander("➕ Existing Bio on Specialty Page (Optional)", expanded=False):
@@ -357,6 +358,7 @@ def render_manual_entry_tab(anthropic_key, google_creds):
                 # Clear specialty fields for next generation
                 st.session_state.specialty_content = ""
                 st.session_state.specialty_bio_text = ""
+                st.session_state.modalities_text = ""
 
                 # Show success
                 st.success(f"✅ Generated bio for **{bio.specialty_name}**!")
@@ -444,6 +446,7 @@ def render_manual_entry_tab(anthropic_key, google_creds):
                 st.session_state.total_tokens_used = 0
                 st.session_state.specialty_content = ""
                 st.session_state.specialty_bio_text = ""
+                st.session_state.modalities_text = ""
                 # Keep therapist info persistent (don't clear)
                 st.rerun()
 
