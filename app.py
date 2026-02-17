@@ -7,11 +7,19 @@ from io import StringIO
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
-from src.scraper.website_scraper import WebsiteScraper
+
+# Core imports (always available)
 from src.generator.bio_generator import BioGenerator
 from src.sheets.sheets_writer import SheetsWriter
 from src.models.data_models import Therapist, Specialty, GeneratedBio
 from src.utils.logger import setup_logger
+
+# Optional scraping imports (only needed for WIP scraping feature)
+try:
+    from src.scraper.website_scraper import WebsiteScraper
+    SCRAPING_AVAILABLE = True
+except ImportError:
+    SCRAPING_AVAILABLE = False
 
 # Load environment variables from .env file
 load_dotenv()
